@@ -1,0 +1,71 @@
+#!/bin/bash
+sleep 30
+
+templimit=65
+
+#вкл режим управления мощьностью ГПУ
+sudo nvidia-smi -pm 1
+
+cd
+
+#кол-во ГПУ в риге
+cp /dev/null GPUtemp
+sudo nvidia-smi -L >> GPUtemp
+summgpu=$(cat ./GPUtemp | wc -l)
+
+#записываем в переменные значения plim, minplim, maxplim для каждой ГПУ
+for (( k = 0; k < summgpu; k++ ))
+do
+        cp /dev/null GPUtemp
+        sudo nvidia-smi -i $k --query-gpu=power.min_limit --format=csv,noheader >> GPUtemp
+        minplim[$k]=$(awk -F. '{print $1}' ./GPUtemp)
+        cp /dev/null GPUtemp
+        sudo nvidia-smi -i $k --query-gpu=power.max_limit --format=csv,noheader >> GPUtemp
+        maxplim[$k]=$(awk -F. '{print $1}' ./GPUtemp)
+        plim[$k]=${maxplim[$k]}-10
+        ptec1[$k]=${plim[$k]}
+        ptec2[$k]=${plim[$k]}
+        sudo nvidia-smi -i $k -pl ${plim[$k]}
+        #echo "plim $k : ${plim[$k]}"
+done
+
+#бесконечный цикл для контроля темпиратуры
+n=1
+while [ $n -gt 0 ]; do
+        for (( k = 0; k < summgpu; k++ ))
+        do
+                temp[$k]=$(sudo nvidia-smi -i $k --query-gpu=temperature.gpu --format=csv,noheader)
+                echo "temp $k = ${temp[$k]}"
+                if [ ${temp[$k]} -ge $templimit ]
+                then
+                        pdelta=$(( ${ptec2[$k]} - 5 ))
+                        if [ $pdelta -ge ${minplim[$k]} ]
+                        then
+                                ptec2[$k]=$(( ${ptec2[$k]} - 5 ))
+                        fi
+                fi
+                tdelta=$(( $templimit - 2 ))
+                if [ ${temp[$k]} -lt $tdelta ]
+                then
+                        pdelta=$(( ${ptec2[$k]} + 5 ))
+                        if [ $pdelta -le ${plim[$k]} ]
+                        then
+                                ptec2[$k]=$(( ${ptec2[$k]} + 5 ))
+                        fi
+                fi
+                if [ ${ptec1[$k]} -ne ${ptec2[$k]} ]
+                then
+                        sudo nvidia-smi -i $k -pl ${ptec2[$k]}
+                        ptec1[$k]=${ptec2[$k]}
+                else
+                        echo "no change plim $k = ${ptec2[$k]} "
+                fi
+        done
+        sleep 1
+done
+
+
+
+
+
+
